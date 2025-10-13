@@ -1,1 +1,4 @@
-# pro-financial-news-analyzer-
+Flask==3.0.0
+requests==2.31.0
+APScheduler==3.10.4
+gunicorn==21.2.0
