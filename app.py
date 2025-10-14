@@ -3,22 +3,36 @@ from datetime import datetime, timedelta
 import sqlite3
 import requests
 import logging
-from apscheduler.schedulers.background import BackgroundScheduler
 import atexit
 import json
 import os
 import feedparser
 import time
 import re
+import sys
+
+# Configure logging before anything else
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    stream=sys.stdout
+)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'financial-news-secret-key')
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Test imports
+try:
+    from apscheduler.schedulers.background import BackgroundScheduler
+    logger.info("APScheduler imported successfully")
+except Exception as e:
+    logger.error(f"Failed to import APScheduler: {e}")
+    raise
 
 # Get database path - use /tmp for Render ephemeral storage
 DB_PATH = os.environ.get('DATABASE_PATH', '/tmp/financial_news.db')
+logger.info(f"Database path set to: {DB_PATH}")
 
 # NEWS SOURCES - Real RSS feeds and APIs
 NEWS_SOURCES = {
@@ -78,9 +92,11 @@ def init_db():
         
         conn.commit()
         conn.close()
-        logging.info(f"Database initialized at {DB_PATH}")
+        logger.info(f"Database initialized at {DB_PATH}")
+        return True
     except Exception as e:
-        logging.error(f"Database initialization error: {e}")
+        logger.error(f"Database initialization error: {e}")
+        return False
 
 def analyze_sentiment(text):
     """Advanced sentiment analysis for financial news"""
@@ -195,7 +211,7 @@ def fetch_rss_news(source_name, source_config):
             articles.append(article)
             
     except Exception as e:
-        logging.error(f"Error fetching RSS from {source_name}: {e}")
+        logger.error(f"Error fetching RSS from {source_name}: {e}")
     
     return articles
 
@@ -253,13 +269,13 @@ def fetch_api_news():
                     articles.append(article)
                     
     except Exception as e:
-        logging.error(f"Error fetching API news: {e}")
+        logger.error(f"Error fetching API news: {e}")
     
     return articles
 
 def fetch_all_news():
     """Fetch news from all sources and analyze"""
-    logging.info("Starting comprehensive news fetch...")
+    logger.info("Starting comprehensive news fetch...")
     all_articles = []
     
     # Fetch from RSS sources
@@ -268,25 +284,25 @@ def fetch_all_news():
             try:
                 articles = fetch_rss_news(source_name, source_config)
                 all_articles.extend(articles)
-                logging.info(f"Fetched {len(articles)} articles from {source_name}")
+                logger.info(f"Fetched {len(articles)} articles from {source_name}")
                 time.sleep(1)  # Be nice to servers
             except Exception as e:
-                logging.error(f"Failed to fetch from {source_name}: {e}")
+                logger.error(f"Failed to fetch from {source_name}: {e}")
     
     # Fetch from API sources
     try:
         api_articles = fetch_api_news()
         all_articles.extend(api_articles)
-        logging.info(f"Fetched {len(api_articles)} articles from API")
+        logger.info(f"Fetched {len(api_articles)} articles from API")
     except Exception as e:
-        logging.error(f"Failed to fetch from API: {e}")
+        logger.error(f"Failed to fetch from API: {e}")
     
     # Save to database
     if all_articles:
         save_articles_to_db(all_articles)
-        logging.info(f"Successfully processed {len(all_articles)} total articles")
+        logger.info(f"Successfully processed {len(all_articles)} total articles")
     else:
-        logging.warning("No articles fetched from any source")
+        logger.warning("No articles fetched from any source")
     
     return all_articles
 
