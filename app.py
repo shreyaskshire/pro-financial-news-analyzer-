@@ -4,54 +4,42 @@ import logging
 import sqlite3
 import time
 import re
-from datetime import datetime, timezone
+from datetime import datetime
 
 from flask import Flask, render_template_string, jsonify, request
 
-# Feedparser, requests, apscheduler are required in requirements.txt
 import feedparser
 import requests
 from requests.adapters import HTTPAdapter
 try:
-    # urllib3 v1.26+ uses "allowed_methods"
     from urllib3.util.retry import Retry
 except Exception:
-    # Retry should still be available; we will handle param compatibility below
-    from urllib3.util.retry import Retry  # let it raise if it truly doesn't exist
+    from urllib3.util.retry import Retry
 
-# APScheduler
 from apscheduler.schedulers.background import BackgroundScheduler
 import atexit
 
-# ---------- Robust zoneinfo fallback ----------
-# Prefer stdlib zoneinfo (Python 3.9+). Fall back to backports.zoneinfo, then pytz.
+# ----- zoneinfo / pytz fallback (NO backports.zoneinfo) -----
 try:
+    # Python 3.9+
     from zoneinfo import ZoneInfo
     IST_ZONE = ZoneInfo("Asia/Kolkata")
 except Exception:
     try:
-        # backports.zoneinfo for older Python
-        from backports.zoneinfo import ZoneInfo  # type: ignore
-        IST_ZONE = ZoneInfo("Asia/Kolkata")
+        import pytz
+        IST_ZONE = pytz.timezone("Asia/Kolkata")
     except Exception:
-        # Last resort: use pytz timezone with naive handling
-        try:
-            import pytz
-            IST_ZONE = pytz.timezone("Asia/Kolkata")
-        except Exception:
-            IST_ZONE = None
+        IST_ZONE = None
 
-# ---------- Configuration ----------
+# ----- Configuration -----
 APP_HOST = os.getenv("APP_HOST", "0.0.0.0")
-# When using gunicorn on Render, it provides $PORT; use it in your run command.
 APP_PORT = int(os.getenv("APP_PORT", os.getenv("PORT", "5000")))
 DEBUG = os.getenv("FLASK_DEBUG", "False").lower() in ("1", "true", "yes")
 DB_PATH = os.getenv("DB_PATH", "financial_news.db")
 MARKETAUX_API_TOKEN = os.getenv("MARKETAUX_API_TOKEN", "DEMO")
 FLASK_SECRET_KEY = os.getenv("FLASK_SECRET_KEY", "please-set-a-secret-key")
-# -----------------------------------
+# --------------------------
 
-# Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 app = Flask(__name__)
@@ -86,17 +74,14 @@ NEWS_SOURCES = {
     },
 }
 
-# ---------- Create requests session with retry (compatible with multiple urllib3 versions) ----------
+# ----- requests session with retry (compatible) -----
 def make_requests_session(retries=3, backoff_factor=0.3, status_forcelist=(500, 502, 504)):
     session = requests.Session()
-    # Build Retry object but be compatible with older urllib3 signature
     retry_kwargs = dict(total=retries, read=retries, connect=retries, backoff_factor=backoff_factor,
                         status_forcelist=status_forcelist)
-    # newer urllib3 uses "allowed_methods"; older uses "method_whitelist"
     try:
         retry = Retry(**retry_kwargs, allowed_methods=frozenset(["GET", "POST"]))
     except TypeError:
-        # fallback for older urllib3 versions
         retry = Retry(**retry_kwargs, method_whitelist=frozenset(["GET", "POST"]))
     adapter = HTTPAdapter(max_retries=retry)
     session.mount("http://", adapter)
@@ -104,7 +89,7 @@ def make_requests_session(retries=3, backoff_factor=0.3, status_forcelist=(500, 
     session.headers.update({"User-Agent": "FinancialNewsBot/1.0 (+https://example.com)"})
     return session
 
-# ---------- Simple sentiment helper (unchanged) ----------
+# ----- sentiment analysis -----
 def analyze_sentiment(text):
     if not text:
         return "Neutral", 0.0, 50
@@ -137,7 +122,7 @@ def analyze_sentiment(text):
     confidence = min(95, max(60, total * 15 + 50))
     return sentiment, score, int(confidence)
 
-# ---------- DB init (call at startup) ----------
+# ----- DB init -----
 def init_db():
     conn = sqlite3.connect(DB_PATH, timeout=30)
     cur = conn.cursor()
@@ -168,7 +153,7 @@ def init_db():
     conn.close()
     logging.info("DB initialized at %s", DB_PATH)
 
-# ---------- RSS fetch ----------
+# ----- RSS fetch -----
 def fetch_rss_news(source_name, source_config, limit_per_feed=10):
     articles = []
     try:
@@ -203,7 +188,7 @@ def fetch_rss_news(source_name, source_config, limit_per_feed=10):
         logging.exception("RSS fetch error for %s: %s", source_name, e)
     return articles
 
-# ---------- API fetch (MarketAux) ----------
+# ----- MarketAux API fetch -----
 def fetch_api_news(session=None):
     articles = []
     try:
@@ -249,7 +234,7 @@ def fetch_api_news(session=None):
         logging.exception("Error fetching MarketAux news: %s", e)
     return articles
 
-# ---------- Combined fetch & save ----------
+# ----- Save & combined fetch -----
 def save_articles_to_db(articles):
     conn = sqlite3.connect(DB_PATH, timeout=30)
     cur = conn.cursor()
@@ -309,10 +294,125 @@ def get_articles_from_db(limit=50, region=None, category=None):
             'timestamp', 'url', 'content']
     return [dict(zip(cols, r)) for r in rows]
 
-# HTML template truncated for brevity in this message but same as earlier; put your full HTML_TEMPLATE here.
-HTML_TEMPLATE = """(PUT YOUR FULL TEMPLATE HERE - same template you used earlier)"""
+# ----- HTML template (unchanged from your original; full template) -----
+HTML_TEMPLATE = '''
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Financial News Analyzer - Live AI Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .sentiment-positive { color: #28a745; font-weight: bold; }
+        .sentiment-negative { color: #dc3545; font-weight: bold; }
+        .sentiment-neutral { color: #ffc107; font-weight: bold; }
+        .news-item { border-left: 4px solid #007bff; margin-bottom: 1rem; padding: 1rem; }
+        .impact-high { background: #dc3545; color: white; padding: 0.2rem 0.5rem; border-radius: 0.3rem; }
+        .impact-medium { background: #ffc107; color: black; padding: 0.2rem 0.5rem; border-radius: 0.3rem; }
+        .impact-low { background: #28a745; color: white; padding: 0.2rem 0.5rem; border-radius: 0.3rem; }
+        .auto-refresh { position: fixed; top: 10px; right: 10px; background: #28a745; color: white; padding: 0.5rem; border-radius: 0.5rem; }
+    </style>
+</head>
+<body class="bg-light">
+    <div class="auto-refresh">
+        <i class="fas fa-sync-alt"></i> Auto-updates every 30min
+    </div>
+    
+    <div class="container-fluid py-4">
+        <div class="row">
+            <div class="col-12">
+                <h1 class="display-6 fw-bold text-primary mb-1">
+                    <i class="fas fa-chart-line me-3"></i>AI Financial News Analyzer
+                </h1>
+                <p class="lead text-muted">Real-time sentiment analysis of Indian & global financial markets</p>
+                <small class="text-muted">Last updated: {{ last_updated }} IST | Total articles: {{ total_articles }}</small>
+            </div>
+        </div>
+        
+        <div class="row mt-4">
+            <div class="col-md-3">
+                <div class="card bg-primary text-white">
+                    <div class="card-body text-center">
+                        <h3>{{ total_articles }}</h3>
+                        <p class="mb-0">Live Articles</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-success text-white">
+                    <div class="card-body text-center">
+                        <h3>{{ positive_news }}</h3>
+                        <p class="mb-0">Positive News</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-danger text-white">
+                    <div class="card-body text-center">
+                        <h3>{{ negative_news }}</h3>
+                        <p class="mb-0">Negative News</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-info text-white">
+                    <div class="card-body text-center">
+                        <h3>{{ avg_confidence }}%</h3>
+                        <p class="mb-0">Avg Confidence</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header bg-primary text-white">
+                        <h5><i class="fas fa-newspaper me-2"></i>Latest Financial News & AI Analysis</h5>
+                    </div>
+                    <div class="card-body">
+                        {% for article in articles %}
+                        <div class="news-item">
+                            <div class="row">
+                                <div class="col-md-8">
+                                    <h6 class="fw-bold mb-2">{{ article.title }}</h6>
+                                    <p class="mb-2">{{ article.summary }}</p>
+                                    <div class="mb-2">
+                                        <span class="badge bg-secondary">{{ article.source }}</span>
+                                        <span class="badge bg-info">{{ article.region }}</span>
+                                        <span class="badge bg-warning">{{ article.category }}</span>
+                                        <span class="sentiment-{{ article.sentiment.lower() }}">{{ article.sentiment }}</span>
+                                    </div>
+                                </div>
+                                <div class="col-md-4 text-end">
+                                    <div class="impact-{{ article.market_impact.lower() }} mb-2">
+                                        Impact: {{ article.impact_score }}/10
+                                    </div>
+                                    <div class="mb-2">
+                                        <strong>AI Confidence:</strong> {{ article.confidence }}%
+                                    </div>
+                                    <small class="text-muted">{{ article.timestamp }}</small>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Auto-refresh every 30 minutes
+        setTimeout(() => location.reload(), 1800000);
+    </script>
+</body>
+</html>
+'''
 
-# ---------- Routes ----------
+# ----- Routes -----
 @app.route("/")
 def index():
     articles = get_articles_from_db(limit=20)
@@ -349,7 +449,7 @@ def manual_fetch():
         logging.exception("Manual fetch failed")
         return jsonify({"error": str(e), "status": "failed"}), 500
 
-# ---------- Startup (only when executed directly) ----------
+# ----- Scheduler -----
 def start_scheduler():
     try:
         scheduler = BackgroundScheduler(timezone=IST_ZONE if IST_ZONE else None)
@@ -361,13 +461,12 @@ def start_scheduler():
     except Exception:
         logging.exception("Failed to start scheduler")
 
+# ----- Main -----
 if __name__ == "__main__":
     init_db()
     start_scheduler()
-    # initial fetch
     try:
         fetch_all_news()
     except Exception:
         logging.exception("Initial fetch failed")
-    # Use app.run for local testing only
     app.run(host=APP_HOST, port=APP_PORT, debug=DEBUG)
