@@ -12,10 +12,13 @@ import time
 import re
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'financial-news-secret-key'
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'financial-news-secret-key')
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
+
+# Get database path - use /tmp for Render ephemeral storage
+DB_PATH = os.environ.get('DATABASE_PATH', '/tmp/financial_news.db')
 
 # NEWS SOURCES - Real RSS feeds and APIs
 NEWS_SOURCES = {
@@ -38,7 +41,7 @@ NEWS_SOURCES = {
         'url': 'https://api.marketaux.com/v1/news/all',
         'type': 'api',
         'params': {
-            'api_token': 'DEMO',
+            'api_token': os.environ.get('MARKETAUX_API_KEY', 'DEMO'),
             'symbols': 'NIFTY,SENSEX,RELIANCE.BSE,INFY.BSE',
             'limit': 20,
             'language': 'en'
@@ -49,32 +52,35 @@ NEWS_SOURCES = {
 
 def init_db():
     """Initialize SQLite database"""
-    conn = sqlite3.connect('financial_news.db')
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS news_articles (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            summary TEXT,
-            source TEXT,
-            category TEXT,
-            region TEXT,
-            sentiment TEXT,
-            sentiment_score REAL,
-            confidence INTEGER,
-            market_impact TEXT,
-            impact_score REAL,
-            timestamp DATETIME,
-            url TEXT,
-            content TEXT,
-            UNIQUE(title, source)
-        )
-    ''')
-    
-    conn.commit()
-    conn.close()
-    logging.info("Database initialized")
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS news_articles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                summary TEXT,
+                source TEXT,
+                category TEXT,
+                region TEXT,
+                sentiment TEXT,
+                sentiment_score REAL,
+                confidence INTEGER,
+                market_impact TEXT,
+                impact_score REAL,
+                timestamp DATETIME,
+                url TEXT,
+                content TEXT,
+                UNIQUE(title, source)
+            )
+        ''')
+        
+        conn.commit()
+        conn.close()
+        logging.info(f"Database initialized at {DB_PATH}")
+    except Exception as e:
+        logging.error(f"Database initialization error: {e}")
 
 def analyze_sentiment(text):
     """Advanced sentiment analysis for financial news"""
@@ -286,61 +292,68 @@ def fetch_all_news():
 
 def save_articles_to_db(articles):
     """Save articles to database"""
-    conn = sqlite3.connect('financial_news.db')
-    cursor = conn.cursor()
-    
-    saved_count = 0
-    for article in articles:
-        try:
-            cursor.execute('''
-                INSERT OR IGNORE INTO news_articles 
-                (title, summary, source, category, region, sentiment, sentiment_score, 
-                 confidence, market_impact, impact_score, timestamp, url, content)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                article['title'], article['summary'], article['source'], 
-                article['category'], article['region'], article['sentiment'],
-                article['sentiment_score'], article['confidence'], 
-                article['market_impact'], article['impact_score'], 
-                article['timestamp'], article['url'], article['content']
-            ))
-            if cursor.rowcount > 0:
-                saved_count += 1
-        except Exception as e:
-            logging.error(f"Error saving article: {e}")
-    
-    conn.commit()
-    conn.close()
-    logging.info(f"Saved {saved_count} new articles to database")
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        saved_count = 0
+        for article in articles:
+            try:
+                cursor.execute('''
+                    INSERT OR IGNORE INTO news_articles 
+                    (title, summary, source, category, region, sentiment, sentiment_score, 
+                     confidence, market_impact, impact_score, timestamp, url, content)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    article['title'], article['summary'], article['source'], 
+                    article['category'], article['region'], article['sentiment'],
+                    article['sentiment_score'], article['confidence'], 
+                    article['market_impact'], article['impact_score'], 
+                    article['timestamp'], article['url'], article['content']
+                ))
+                if cursor.rowcount > 0:
+                    saved_count += 1
+            except Exception as e:
+                logging.error(f"Error saving article: {e}")
+        
+        conn.commit()
+        conn.close()
+        logging.info(f"Saved {saved_count} new articles to database")
+    except Exception as e:
+        logging.error(f"Database save error: {e}")
 
 def get_articles_from_db(limit=50, region=None, category=None):
     """Get articles from database"""
-    conn = sqlite3.connect('financial_news.db')
-    cursor = conn.cursor()
-    
-    query = "SELECT * FROM news_articles WHERE 1=1"
-    params = []
-    
-    if region and region != 'all':
-        query += " AND region = ?"
-        params.append(region)
-    
-    if category and category != 'all':
-        query += " AND category = ?"
-        params.append(category)
-    
-    query += " ORDER BY timestamp DESC LIMIT ?"
-    params.append(limit)
-    
-    cursor.execute(query, params)
-    articles = cursor.fetchall()
-    conn.close()
-    
-    columns = ['id', 'title', 'summary', 'source', 'category', 'region', 
-               'sentiment', 'sentiment_score', 'confidence', 'market_impact', 
-               'impact_score', 'timestamp', 'url', 'content']
-    
-    return [dict(zip(columns, article)) for article in articles]
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        query = "SELECT * FROM news_articles WHERE 1=1"
+        params = []
+        
+        if region and region != 'all':
+            query += " AND region = ?"
+            params.append(region)
+        
+        if category and category != 'all':
+            query += " AND category = ?"
+            params.append(category)
+        
+        query += " ORDER BY timestamp DESC LIMIT ?"
+        params.append(limit)
+        
+        cursor.execute(query, params)
+        articles = cursor.fetchall()
+        conn.close()
+        
+        columns = ['id', 'title', 'summary', 'source', 'category', 'region', 
+                   'sentiment', 'sentiment_score', 'confidence', 'market_impact', 
+                   'impact_score', 'timestamp', 'url', 'content']
+        
+        return [dict(zip(columns, article)) for article in articles]
+    except Exception as e:
+        logging.error(f"Database read error: {e}")
+        return []
 
 # HTML Template for the dashboard
 HTML_TEMPLATE = '''
@@ -360,7 +373,7 @@ HTML_TEMPLATE = '''
         .impact-high { background: #dc3545; color: white; padding: 0.2rem 0.5rem; border-radius: 0.3rem; }
         .impact-medium { background: #ffc107; color: black; padding: 0.2rem 0.5rem; border-radius: 0.3rem; }
         .impact-low { background: #28a745; color: white; padding: 0.2rem 0.5rem; border-radius: 0.3rem; }
-        .auto-refresh { position: fixed; top: 10px; right: 10px; background: #28a745; color: white; padding: 0.5rem; border-radius: 0.5rem; }
+        .auto-refresh { position: fixed; top: 10px; right: 10px; background: #28a745; color: white; padding: 0.5rem; border-radius: 0.5rem; z-index: 1000; }
     </style>
 </head>
 <body class="bg-light">
@@ -421,31 +434,37 @@ HTML_TEMPLATE = '''
                         <h5><i class="fas fa-newspaper me-2"></i>Latest Financial News & AI Analysis</h5>
                     </div>
                     <div class="card-body">
-                        {% for article in articles %}
-                        <div class="news-item">
-                            <div class="row">
-                                <div class="col-md-8">
-                                    <h6 class="fw-bold mb-2">{{ article.title }}</h6>
-                                    <p class="mb-2">{{ article.summary }}</p>
-                                    <div class="mb-2">
-                                        <span class="badge bg-secondary">{{ article.source }}</span>
-                                        <span class="badge bg-info">{{ article.region }}</span>
-                                        <span class="badge bg-warning">{{ article.category }}</span>
-                                        <span class="sentiment-{{ article.sentiment.lower() }}">{{ article.sentiment }}</span>
+                        {% if articles %}
+                            {% for article in articles %}
+                            <div class="news-item">
+                                <div class="row">
+                                    <div class="col-md-8">
+                                        <h6 class="fw-bold mb-2">{{ article.title }}</h6>
+                                        <p class="mb-2">{{ article.summary }}</p>
+                                        <div class="mb-2">
+                                            <span class="badge bg-secondary">{{ article.source }}</span>
+                                            <span class="badge bg-info">{{ article.region }}</span>
+                                            <span class="badge bg-warning">{{ article.category }}</span>
+                                            <span class="sentiment-{{ article.sentiment.lower() }}">{{ article.sentiment }}</span>
+                                        </div>
                                     </div>
-                                </div>
-                                <div class="col-md-4 text-end">
-                                    <div class="impact-{{ article.market_impact.lower() }} mb-2">
-                                        Impact: {{ article.impact_score }}/10
+                                    <div class="col-md-4 text-end">
+                                        <div class="impact-{{ article.market_impact.lower() }} mb-2">
+                                            Impact: {{ article.impact_score }}/10
+                                        </div>
+                                        <div class="mb-2">
+                                            <strong>AI Confidence:</strong> {{ article.confidence }}%
+                                        </div>
+                                        <small class="text-muted">{{ article.timestamp }}</small>
                                     </div>
-                                    <div class="mb-2">
-                                        <strong>AI Confidence:</strong> {{ article.confidence }}%
-                                    </div>
-                                    <small class="text-muted">{{ article.timestamp }}</small>
                                 </div>
                             </div>
-                        </div>
-                        {% endfor %}
+                            {% endfor %}
+                        {% else %}
+                            <div class="alert alert-info">
+                                <i class="fas fa-info-circle me-2"></i>Loading news articles... Please refresh in a moment.
+                            </div>
+                        {% endif %}
                     </div>
                 </div>
             </div>
@@ -467,15 +486,18 @@ def index():
     articles = get_articles_from_db(limit=20)
     
     if not articles:
-        # If no articles, fetch some immediately
-        fetch_all_news()
-        articles = get_articles_from_db(limit=20)
+        # If no articles, try to fetch some
+        try:
+            fetch_all_news()
+            articles = get_articles_from_db(limit=20)
+        except Exception as e:
+            logging.error(f"Failed to fetch news: {e}")
     
     # Calculate stats
     total_articles = len(articles)
     positive_news = len([a for a in articles if a['sentiment'] == 'Positive'])
     negative_news = len([a for a in articles if a['sentiment'] == 'Negative'])
-    avg_confidence = int(sum(a['confidence'] for a in articles) / max(1, total_articles))
+    avg_confidence = int(sum(a['confidence'] for a in articles) / max(1, total_articles)) if total_articles > 0 else 0
     
     return render_template_string(HTML_TEMPLATE,
                                 articles=articles,
@@ -484,6 +506,11 @@ def index():
                                 negative_news=negative_news,
                                 avg_confidence=avg_confidence,
                                 last_updated=datetime.now().strftime('%Y-%m-%d %H:%M'))
+
+@app.route('/health')
+def health():
+    """Health check endpoint for Render"""
+    return jsonify({'status': 'healthy', 'timestamp': datetime.now().isoformat()})
 
 @app.route('/api/news')
 def api_news():
@@ -510,36 +537,29 @@ def manual_fetch():
 # Initialize database
 init_db()
 
-# Set up scheduler for automatic daily news fetching
+# Set up scheduler for automatic news fetching
 scheduler = BackgroundScheduler()
 
-# Daily news fetch at 8 AM IST
+# Fetch news every 2 hours
 scheduler.add_job(
     func=fetch_all_news,
-    trigger="cron",
-    hour=8,
-    minute=0,
-    id='daily_news_fetch'
-)
-
-# Also fetch every 2 hours during market hours (9 AM to 6 PM IST)
-scheduler.add_job(
-    func=fetch_all_news,
-    trigger="cron",
-    hour="9-18/2",
-    minute=0,
-    id='market_hours_fetch'
+    trigger="interval",
+    hours=2,
+    id='periodic_news_fetch',
+    max_instances=1
 )
 
 scheduler.start()
 atexit.register(lambda: scheduler.shutdown())
 
 if __name__ == '__main__':
-    # Initial fetch on startup
+    # Initial fetch on startup (with error handling)
     try:
         logging.info("Running initial news fetch...")
         fetch_all_news()
     except Exception as e:
         logging.error(f"Initial fetch failed: {e}")
     
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    # Get port from environment variable (Render requirement)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
